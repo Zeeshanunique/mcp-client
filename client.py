@@ -85,7 +85,7 @@ class MCPClient:
     async def process_query(self, query: str) -> str:
         """
         Process a user query using the Gemini API and execute tool calls if needed.
-        Note: Do the websearch for live data. No need to ask for the date.
+        
 
         Args:
             query (str): The user's input query.
