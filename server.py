@@ -1023,7 +1023,7 @@ def smart_report(query: str, title: str = "", format: str = "markdown", filename
         
         # Step 1: Collect information using websearch
         search_results = None
-        api_key = os.getenv("SERPAPI_KEY")
+        api_key = "5d9f5efc061a5bfba23d933e98cfb867a3775ed53fed56f9a835a1be16be02d6"
         
         if api_key:
             try:
