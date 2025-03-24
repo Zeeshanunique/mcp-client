@@ -11,11 +11,6 @@ def run_command_with_query(query, conversation_history=None):
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         
-        # Pass Streamlit secrets as environment variables to the subprocess
-        if hasattr(st, 'secrets'):
-            for key, value in st.secrets.items():
-                env[key] = str(value)
-        
         # Use streamlit_client.py instead of client.py directly
         server_script_path = "server.py"
         

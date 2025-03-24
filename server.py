@@ -14,29 +14,6 @@ from dotenv import load_dotenv, set_key
 from mcp.server.fastmcp import FastMCP
 from serpapi import GoogleSearch
 
-# Function to get API keys from various sources
-def get_api_key(key_name, default=None):
-    """
-    Get API key from Streamlit secrets, environment variables, or default value.
-    
-    Args:
-        key_name: Name of the API key
-        default: Default value if key not found
-        
-    Returns:
-        API key value or default
-    """
-    try:
-        # First try to get from Streamlit secrets
-        import streamlit as st
-        if hasattr(st, 'secrets') and key_name in st.secrets:
-            return st.secrets[key_name]
-    except (ImportError, AttributeError):
-        pass
-    
-    # Then try environment variables
-    return os.getenv(key_name, default)
-
 # Load environment variables
 load_dotenv()
 
@@ -89,11 +66,11 @@ def websearch(query: str) -> Dict[str, Any]:
     Returns:
         A dictionary with search results or error information.
     """
-    api_key = get_api_key("SERPAPI_KEY")
+    api_key = os.getenv("SERPAPI_KEY")
     if not api_key:
         return format_error_response(
             "SERPAPI_KEY environment variable not set",
-            "Please add your SerpAPI key to the .env file or Streamlit secrets"
+            "Please add your SerpAPI key to the .env file"
         )
     
     # Set up the base parameters
@@ -164,7 +141,7 @@ def diagnose_websearch(dummy: str = "run") -> Dict[str, Any]:
     }
     
     # Check environment variables
-    api_key = get_api_key("SERPAPI_KEY")
+    api_key = os.getenv("SERPAPI_KEY")
     diagnostics["environment"]["SERPAPI_KEY"] = "Set" if api_key else "Not set"
     if api_key:
         # Mask the API key for security but show if it's provided
@@ -216,7 +193,7 @@ def diagnose_websearch(dummy: str = "run") -> Dict[str, Any]:
     
     if not api_key:
         issues.append("Missing API key")
-        recommendations.append("Add your SerpAPI key to the .env file or Streamlit secrets")
+        recommendations.append("Add your SerpAPI key to the .env file as SERPAPI_KEY=your_key_here")
     
     if "Error" in diagnostics["connectivity"].get("serpapi_status", ""):
         issues.append("Cannot connect to SerpAPI")
@@ -253,19 +230,6 @@ def set_serpapi_key(api_key: str) -> Dict[str, Any]:
         )
     
     try:
-        # Try to set in Streamlit secrets first if running in Streamlit
-        try:
-            import streamlit as st
-            if hasattr(st, 'secrets'):
-                # In production, we can't modify secrets directly, so inform the user
-                return {
-                    "status": "info",
-                    "message": "Running in Streamlit Cloud environment. To set your API key, please add it to your Streamlit secrets.",
-                    "details": "See https://docs.streamlit.io/streamlit-cloud/get-started/deploy-an-app/secrets-management for instructions on setting secrets."
-                }
-        except (ImportError, AttributeError):
-            pass
-        
         # Find .env file
         env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
         if not os.path.exists(env_path):
@@ -320,7 +284,7 @@ def set_serpapi_key(api_key: str) -> Dict[str, Any]:
     except Exception as e:
         return format_error_response(
             f"Failed to update SerpAPI key: {str(e)}", 
-            "You may need to manually add SERPAPI_KEY=your_key_here to your .env file or Streamlit secrets"
+            "You may need to manually add SERPAPI_KEY=your_key_here to your .env file"
         )
 
 @mcp.tool()
@@ -915,7 +879,7 @@ def smart_report(query: str, title: str = "", format: str = "markdown", filename
 def _fetch_search_results(query: str) -> Optional[List[Dict[str, Any]]]:
     """Helper function to fetch search results for a query."""
     search_results = None
-    api_key = get_api_key("SERPAPI_KEY")
+    api_key = os.getenv("SERPAPI_KEY")
     
     if api_key:
         try:
@@ -1000,7 +964,7 @@ def get_weather(location: str, units: str = "metric") -> Dict[str, Any]:
     """
     try:
         # Check for OpenWeather API key
-        api_key = get_api_key("OPENWEATHER_API_KEY")
+        api_key = os.getenv("OPENWEATHER_API_KEY")
         if not api_key:
             return format_error_response(
                 "OPENWEATHER_API_KEY environment variable not set",

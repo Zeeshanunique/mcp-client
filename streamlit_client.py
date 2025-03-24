@@ -3,58 +3,58 @@ import asyncio
 import sys
 import json
 import argparse
-from client import MCPClient
+from client import MCPClient, types
 
 async def main():
-    """Main function to run the MCP client with a single query."""
-    parser = argparse.ArgumentParser(description='Run MCP client with a single query')
-    parser.add_argument('server_script', help='Path to the server script')
+    """
+    Standalone script to process a single query with conversation history.
+    Designed to be called from a Streamlit app.
+    """
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Process a query using the MCP client with conversation history.')
+    parser.add_argument('server_script', help='Path to the MCP server script')
     parser.add_argument('query', help='Query to process')
-    parser.add_argument('--history', help='JSON string of conversation history', default=None)
-    
+    parser.add_argument('--history', help='JSON string containing conversation history')
     args = parser.parse_args()
-    
+
     client = MCPClient()
     try:
         # Connect to the MCP server
         await client.connect_to_server(args.server_script)
-        
-        # If history is provided, load it
+
+        # Load conversation history if provided
         if args.history:
             try:
                 history_data = json.loads(args.history)
+                # Convert the plain dict history to Gemini Content objects
                 for entry in history_data:
-                    if entry['role'] == 'user':
-                        # Create a user message
-                        from google.genai import types
-                        user_content = types.Content(
+                    role = entry.get('role')
+                    content = entry.get('content', '')
+                    
+                    if role == 'user':
+                        client.conversation_history.append(types.Content(
                             role='user',
-                            parts=[types.Part.from_text(text=entry['content'])]
-                        )
-                        client.conversation_history.append(user_content)
-                    elif entry['role'] == 'assistant':
-                        # Create an assistant message
-                        from google.genai import types
-                        assistant_content = types.Content(
+                            parts=[types.Part.from_text(text=content)]
+                        ))
+                    elif role == 'assistant':
+                        client.conversation_history.append(types.Content(
                             role='assistant',
-                            parts=[types.Part.from_text(text=entry['content'])]
-                        )
-                        client.conversation_history.append(assistant_content)
-            except json.JSONDecodeError:
-                print(f"Warning: Could not parse conversation history: {args.history}")
-        
-        # Process the query and get the response
+                            parts=[types.Part.from_text(text=content)]
+                        ))
+                
+                print(f"Loaded {len(history_data)} conversation history entries")
+            except json.JSONDecodeError as e:
+                print(f"Error loading history: {e}")
+
+        # Process the query
         response = await client.process_query(args.query)
         
-        # Output the response for the main app to capture
-        print(f"\nResponse: {response}")
-    except Exception as e:
-        print(f"Error: {str(e)}", file=sys.stderr)
-        sys.exit(1)
+        # Print the response with a marker for easy extraction
+        print("\nResponse:", response)
     finally:
-        # Ensure resources are cleaned up
+        # Clean up resources
         await client.cleanup()
 
 if __name__ == "__main__":
-    # Run the main function within the asyncio event loop
+    # Run the main function
     asyncio.run(main())
