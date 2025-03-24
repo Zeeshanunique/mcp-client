@@ -22,82 +22,17 @@ mcp = FastMCP("terminal")
 # Ensure the workspace path is correctly formatted for Windows
 DEFAULT_WORKSPACE = os.path.join("C:/Users/dell/Desktop/mcp/workspace")
 
-# Constants for NWS API
-NWS_API_BASE = "https://api.weather.gov"
-USER_AGENT = "weather-app/1.0"
-
 # Common utility functions
-def get_full_path(relative_path: str) -> str:
-    """Get the full path from a workspace-relative path."""
-    return os.path.join(DEFAULT_WORKSPACE, relative_path)
+def get_full_path(path: str) -> str:
+    """Convert a path to an absolute path."""
+    return os.path.abspath(os.path.expanduser(path))
 
-def format_error_response(error_message: str, suggestion: str = "") -> Dict[str, str]:
-    """Create a standardized error response."""
-    response = {"error": error_message}
-    if suggestion:
-        response["suggestion"] = suggestion
+def format_error_response(error: str, details: Optional[str] = None) -> Dict[str, Any]:
+    """Format a standardized error response."""
+    response = {"error": error}
+    if details:
+        response["details"] = details
     return response
-
-# National Weather Service API utility functions
-async def make_nws_request(url: str) -> Dict[str, Any]:
-    """Make a request to the National Weather Service API."""
-    headers = {
-        "User-Agent": USER_AGENT,
-        "Accept": "application/geo+json"
-    }
-    
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=headers, timeout=30.0)
-            response.raise_for_status()
-            return response.json()
-    except httpx.HTTPStatusError as e:
-        print(f"HTTP error: {e.response.status_code} - {e.response.text}")
-        return {}
-    except httpx.RequestError as e:
-        print(f"Request error: {str(e)}")
-        return {}
-    except Exception as e:
-        print(f"Error during API request: {str(e)}")
-        return {}
-
-def format_alert(alert_feature: Dict[str, Any]) -> str:
-    """Format a weather alert into a readable string."""
-    props = alert_feature.get("properties", {})
-    
-    headline = props.get("headline", "Unknown Alert")
-    severity = props.get("severity", "Unknown")
-    urgency = props.get("urgency", "Unknown")
-    description = props.get("description", "No description available")
-    instruction = props.get("instruction", "No specific instructions provided")
-    
-    # Extract just date and time from the timestamps
-    effective = props.get("effective", "")
-    expires = props.get("expires", "")
-    
-    if effective:
-        effective = effective.split('T')[0] + ' ' + effective.split('T')[1][:5]
-    if expires:
-        expires = expires.split('T')[0] + ' ' + expires.split('T')[1][:5]
-    
-    # Truncate description if it's too long
-    if len(description) > 500:
-        description = description[:500] + "..."
-    
-    # Format the alert
-    alert_text = f"""
-📢 {headline}
-Severity: {severity.upper()}
-Urgency: {urgency.capitalize()}
-Effective: {effective}
-Expires: {expires}
-
-{description}
-
-INSTRUCTIONS:
-{instruction}
-"""
-    return alert_text.strip()
 
 @mcp.tool()
 async def run_command(command: str) -> str:
@@ -121,195 +56,160 @@ async def run_command(command: str) -> str:
         return str(e)
 
 @mcp.tool()
-async def get_weather_alerts(state: str) -> Dict[str, Any]:
+def websearch(query: str) -> Dict[str, Any]:
     """
-    Get weather alerts for a US state from the National Weather Service.
+    Perform a web search using SerpAPI.
     
     Args:
-        state: Two-letter US state code (e.g., CA, NY, TX)
+        query: The search query.
     
     Returns:
-        Dictionary with alerts information or error details
+        A dictionary with search results or error information.
     """
-    if not isinstance(state, str) or len(state) != 2:
+    api_key = os.getenv("SERPAPI_KEY")
+    if not api_key:
         return format_error_response(
-            "Invalid state code format",
-            "Please provide a valid two-letter US state code (e.g., CA, NY, TX)"
+            "SERPAPI_KEY environment variable not set",
+            "Please add your SerpAPI key to the .env file"
         )
     
-    # Convert to uppercase
-    state = state.upper()
-    
-    # Get alerts from NWS API
-    url = f"{NWS_API_BASE}/alerts/active/area/{state}"
-    data = await make_nws_request(url)
-    
-    if not data or "features" not in data:
-        return format_error_response(
-            "Unable to fetch alerts or no alerts found",
-            "The National Weather Service API may be experiencing issues"
-        )
-    
-    # Process the alerts
-    alerts_count = len(data["features"])
-    
-    if alerts_count == 0:
-        return {
-            "state": state,
-            "count": 0,
-            "message": "No active weather alerts for this state.",
-            "alerts": []
-        }
-    
-    # Format alerts for response
-    formatted_alerts = []
-    for feature in data["features"]:
-        props = feature.get("properties", {})
-        
-        alert_data = {
-            "headline": props.get("headline", "Unknown Alert"),
-            "severity": props.get("severity", "Unknown"),
-            "urgency": props.get("urgency", "Unknown"),
-            "certainty": props.get("certainty", "Unknown"),
-            "event": props.get("event", "Unknown Event"),
-            "effective": props.get("effective", ""),
-            "expires": props.get("expires", ""),
-            "sender": props.get("senderName", "National Weather Service"),
-            "description": props.get("description", "No description available"),
-            "instruction": props.get("instruction", "No specific instructions provided"),
-            "area": props.get("areaDesc", "Unknown area")
-        }
-        
-        formatted_alerts.append(alert_data)
-    
-    # Create the response
-    return {
-        "state": state,
-        "count": alerts_count,
-        "message": f"Found {alerts_count} active weather alert{'s' if alerts_count != 1 else ''} for {state}.",
-        "alerts": formatted_alerts
+    # Set up the base parameters
+    params = {
+        "q": query,
+        "api_key": api_key,
+        "engine": "google",
+        "num": 5  # Limit to 5 results
     }
+    
+    try:
+        # Execute the search
+        search = GoogleSearch(params)
+        results = search.get_dict()
+        
+        # Get organic results
+        organic_results = results.get("organic_results", [])
+        
+        # If no results were found
+        if not organic_results:
+            return format_error_response(
+                "No results found for the query",
+                "Try a different search query with more specific terms"
+            )
+        
+        # Process and format the results for better readability
+        formatted_results = []
+        for result in organic_results:
+            formatted_result = {
+                "title": result.get("title", "No title"),
+                "link": result.get("link", ""),
+                "snippet": result.get("snippet", "No description available")
+            }
+            formatted_results.append(formatted_result)
+        
+        return {
+            "results": formatted_results,
+            "count": len(formatted_results)
+        }
+    except Exception as e:
+        error_message = str(e)
+        suggestion = ""
+        
+        # Provide helpful suggestions for common errors
+        if "authentication" in error_message.lower() or "api key" in error_message.lower():
+            suggestion = "Check that your SerpAPI key is valid and has sufficient credits"
+        elif "connection" in error_message.lower():
+            suggestion = "Check your internet connection and try again"
+        
+        return format_error_response(f"Search error: {error_message}", suggestion)
 
 @mcp.tool()
-async def get_nws_forecast(latitude: float, longitude: float) -> Dict[str, Any]:
+def diagnose_websearch(dummy: str = "run") -> Dict[str, Any]:
     """
-    Get detailed weather forecast for a US location from the National Weather Service.
+    Diagnose issues with the web search functionality.
     
     Args:
-        latitude: Latitude of the location (decimal degrees)
-        longitude: Longitude of the location (decimal degrees)
+        dummy: Optional parameter (not used) to satisfy API requirements
     
     Returns:
-        Dictionary with forecast information or error details
+        A dictionary with diagnostic information.
     """
+    diagnostics = {
+        "environment": {},
+        "connectivity": {},
+        "serpapi": {},
+        "system": {}
+    }
+    
+    # Check environment variables
+    api_key = os.getenv("SERPAPI_KEY")
+    diagnostics["environment"]["SERPAPI_KEY"] = "Set" if api_key else "Not set"
+    if api_key:
+        # Mask the API key for security but show if it's provided
+        diagnostics["environment"]["SERPAPI_KEY_LENGTH"] = len(api_key)
+        diagnostics["environment"]["SERPAPI_KEY_PREVIEW"] = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "Too short"
+    
+    # Check system information
+    diagnostics["system"]["python_version"] = sys.version
+    diagnostics["system"]["platform"] = platform.platform()
+    
+    # Check network connectivity
     try:
-        # Validate coordinates
-        if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
-            return format_error_response(
-                "Invalid coordinates",
-                "Latitude must be between -90 and 90, and longitude between -180 and 180"
-            )
-        
-        # First get the forecast grid endpoint
-        points_url = f"{NWS_API_BASE}/points/{latitude},{longitude}"
-        points_data = await make_nws_request(points_url)
-        
-        if not points_data or "properties" not in points_data:
-            return format_error_response(
-                "Unable to fetch forecast data for this location",
-                "The location might be outside NWS coverage area (US only) or the API may be experiencing issues"
-            )
-        
-        # Get location info
-        location_props = points_data["properties"]
-        location_info = {
-            "city": location_props.get("relativeLocation", {}).get("properties", {}).get("city", "Unknown"),
-            "state": location_props.get("relativeLocation", {}).get("properties", {}).get("state", "Unknown"),
-            "grid_id": location_props.get("gridId", ""),
-            "grid_x": location_props.get("gridX", ""),
-            "grid_y": location_props.get("gridY", "")
-        }
-        
-        # Get the forecast URL from the points response
-        forecast_url = location_props.get("forecast")
-        if not forecast_url:
-            return format_error_response(
-                "No forecast URL available for this location",
-                "The location might be outside NWS coverage area (US only)"
-            )
-        
-        hourly_forecast_url = location_props.get("forecastHourly")
-        
-        # Get the main forecast data
-        forecast_data = await make_nws_request(forecast_url)
-        
-        if not forecast_data or "properties" not in forecast_data:
-            return format_error_response(
-                "Unable to fetch detailed forecast",
-                "The National Weather Service API may be experiencing issues"
-            )
-        
-        # Extract and format forecast periods
-        periods = forecast_data["properties"]["periods"]
-        
-        # Process the forecast periods
-        forecast_periods = []
-        for period in periods:
-            forecast_period = {
-                "name": period.get("name", "Unknown"),
-                "start_time": period.get("startTime", ""),
-                "end_time": period.get("endTime", ""),
-                "temperature": period.get("temperature"),
-                "temperature_unit": period.get("temperatureUnit"),
-                "temperature_trend": period.get("temperatureTrend"),
-                "wind_speed": period.get("windSpeed"),
-                "wind_direction": period.get("windDirection"),
-                "icon": period.get("icon"),
-                "short_forecast": period.get("shortForecast"),
-                "detailed_forecast": period.get("detailedForecast")
-            }
-            forecast_periods.append(forecast_period)
-        
-        # Get hourly forecast if available
-        hourly_periods = []
-        if hourly_forecast_url:
-            hourly_data = await make_nws_request(hourly_forecast_url)
-            
-            if hourly_data and "properties" in hourly_data and "periods" in hourly_data["properties"]:
-                # Limit to next 24 hours
-                hourly_periods_raw = hourly_data["properties"]["periods"][:24]
-                
-                for period in hourly_periods_raw:
-                    hourly_period = {
-                        "time": period.get("startTime", ""),
-                        "temperature": period.get("temperature"),
-                        "temperature_unit": period.get("temperatureUnit"),
-                        "wind_speed": period.get("windSpeed"),
-                        "wind_direction": period.get("windDirection"),
-                        "icon": period.get("icon"),
-                        "forecast": period.get("shortForecast")
-                    }
-                    hourly_periods.append(hourly_period)
-        
-        # Create the final response
-        return {
-            "location": location_info,
-            "coordinates": {
-                "latitude": latitude,
-                "longitude": longitude
-            },
-            "forecast": forecast_periods,
-            "hourly_forecast": hourly_periods,
-            "updated": forecast_data.get("properties", {}).get("updated", ""),
-            "units": "us",  # NWS always uses US units
-            "attribution": "Data from National Weather Service (weather.gov)"
-        }
-        
+        response = requests.get("https://serpapi.com", timeout=5)
+        diagnostics["connectivity"]["serpapi_status"] = f"OK ({response.status_code})"
     except Exception as e:
-        return format_error_response(
-            f"Failed to get forecast: {str(e)}",
-            "There was a problem fetching the forecast data"
-        )
+        diagnostics["connectivity"]["serpapi_status"] = f"Error: {str(e)}"
+    
+    try:
+        response = requests.get("https://google.com", timeout=5)
+        diagnostics["connectivity"]["google_status"] = f"OK ({response.status_code})"
+    except Exception as e:
+        diagnostics["connectivity"]["google_status"] = f"Error: {str(e)}"
+    
+    # Check SerpAPI validity if key is available
+    if api_key:
+        try:
+            params = {
+                "q": "test query",
+                "api_key": api_key,
+                "engine": "google",
+                "num": 1
+            }
+            search = GoogleSearch(params)
+            results = search.get_dict()
+            
+            if "error" in results:
+                diagnostics["serpapi"]["test_query"] = f"Error: {results['error']}"
+            else:
+                diagnostics["serpapi"]["test_query"] = "Success"
+                diagnostics["serpapi"]["result_count"] = len(results.get("organic_results", []))
+        except Exception as e:
+            diagnostics["serpapi"]["test_query"] = f"Exception: {str(e)}"
+    else:
+        diagnostics["serpapi"]["test_query"] = "Skipped (no API key)"
+    
+    # Build recommendation
+    issues = []
+    recommendations = []
+    
+    if not api_key:
+        issues.append("Missing API key")
+        recommendations.append("Add your SerpAPI key to the .env file as SERPAPI_KEY=your_key_here")
+    
+    if "Error" in diagnostics["connectivity"].get("serpapi_status", ""):
+        issues.append("Cannot connect to SerpAPI")
+        recommendations.append("Check your internet connection and firewall settings")
+    
+    if api_key and "Error" in diagnostics["serpapi"].get("test_query", ""):
+        issues.append("API key may be invalid")
+        recommendations.append("Verify your SerpAPI key is correct and has credits available")
+    
+    diagnostics["summary"] = {
+        "issues_detected": issues,
+        "recommendations": recommendations,
+        "status": "OK" if not issues else "Problems detected"
+    }
+    
+    return diagnostics
 
 @mcp.tool()
 def set_serpapi_key(api_key: str) -> Dict[str, Any]:
