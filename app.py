@@ -67,6 +67,7 @@ async def on_chat_start():
         name="clear_history",
         label="Clear History",
         description="Clear the conversation history",
+        payload={}
     ).send()
 
 @cl.on_message
