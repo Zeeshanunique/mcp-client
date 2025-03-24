@@ -106,6 +106,17 @@ class MCPClient:
         # Use the full conversation history for context
         contents_history = self.conversation_history.copy()
 
+        # Add a system instruction to use websearch for real-time data
+        system_instruction = types.Content(
+            role='system',
+            parts=[types.Part.from_text(
+                text="When you don't have access to real-time or recent information, use the websearch tool to find it instead of apologizing. Don't say 'I don't have access to real-time data' or similar phrases."
+            )]
+        )
+        
+        # Insert the system instruction at the beginning of the history
+        contents_history.insert(0, system_instruction)
+
         # Send user input to Gemini AI and include available tools for function calling
         response = self.genai_client.models.generate_content(
             model='gemini-2.0-flash-lite',  # Specifies which Gemini model to use
@@ -133,7 +144,102 @@ class MCPClient:
                 if has_function_calls:
                     break
             
-            # If no function calls, break the loop
+            # If no function calls, check if response contains phrases about lacking real-time data
+            if not has_function_calls:
+                for candidate in response.candidates:
+                    for part in candidate.content.parts:
+                        if isinstance(part, types.Part) and part.text:
+                            # Check for phrases indicating lack of real-time data
+                            phrases = [
+                                "i don't have access to real-time",
+                                "i don't have access to current",
+                                "i cannot provide real-time",
+                                "i cannot provide up-to-date",
+                                "i cannot provide current",
+                                "i don't have real-time",
+                                "i don't have the latest",
+                                "i don't have current",
+                                "i can't access real-time",
+                                "i cannot access current",
+                                "as an ai, i don't have",
+                                "my knowledge is limited to",
+                                "i am not able to access",
+                                "i don't have the ability to access"
+                            ]
+                            
+                            lower_text = part.text.lower()
+                            needs_websearch = any(phrase in lower_text for phrase in phrases)
+                            
+                            if needs_websearch:
+                                print("\n[Detected lack of real-time information, auto-triggering websearch]")
+                                
+                                # Create and add a simulated function call for websearch
+                                assistant_content = types.Content(
+                                    role='assistant',
+                                    parts=[types.Part.from_function_call(
+                                        name="websearch",
+                                        args={"query": query}
+                                    )]
+                                )
+                                
+                                # Add to history
+                                contents_history.append(assistant_content)
+                                self.conversation_history.append(assistant_content)
+                                
+                                # Execute the websearch
+                                try:
+                                    result = await self.session.call_tool("websearch", {"query": query})
+                                    
+                                    # Check for errors
+                                    if isinstance(result.content, Dict) and "error" in result.content:
+                                        print(f"\n[Tool error: {result.content['error']}]")
+                                        error_with_help = {
+                                            "error": result.content["error"],
+                                            "status": "error"
+                                        }
+                                        function_response = {"result": error_with_help}
+                                    else:
+                                        # Handle websearch results
+                                        if isinstance(result.content, Dict) and "results" in result.content:
+                                            count = result.content.get("count", 0)
+                                            print(f"\n[Retrieved {count} search results]")
+                                        function_response = {"result": result.content, "status": "success"}
+                                except Exception as e:
+                                    error_msg = str(e)
+                                    print(f"\n[Error executing websearch: {error_msg}]")
+                                    function_response = {"result": {"error": error_msg, "status": "error"}}
+                                
+                                # Format the tool response for Gemini
+                                function_response_content = types.Content(
+                                    role='tool',
+                                    parts=[
+                                        types.Part.from_function_response(
+                                            name="websearch",
+                                            response=function_response
+                                        )
+                                    ]
+                                )
+                                
+                                # Add tool response to history
+                                contents_history.append(function_response_content)
+                                self.conversation_history.append(function_response_content)
+                                
+                                # Get a new response from Gemini with the websearch results
+                                response = self.genai_client.models.generate_content(
+                                    model='gemini-2.0-flash-001',
+                                    contents=contents_history,
+                                    config=types.GenerateContentConfig(
+                                        tools=self.function_declarations,
+                                    ),
+                                )
+                                
+                                # Continue the iteration to process this new response
+                                has_function_calls = True
+                                break
+                    if has_function_calls:
+                        break
+            
+            # If still no function calls or no auto-websearch was triggered, break the loop
             if not has_function_calls:
                 break
                 
@@ -190,9 +296,9 @@ class MCPClient:
                                 
                                 # Special case for websearch with no results
                                 if tool_name == "websearch" and "No results found" in str(result.content):
-                                    return "I'm sorry, I couldn't find any web search results for that query. " + \
+                                    return "I couldn't find any web search results for that query. " + \
                                            (solution or "") + " " + (suggestion or "") + \
-                                           "\n\nPlease check that your SERPAPI_KEY is valid in your .env file."
+                                           "\n\nPlease try a different search query with more specific terms."
                                     
                                 # Special case for websearch API key issues
                                 if tool_name == "websearch" and "SERPAPI_KEY" in str(result.content):
@@ -262,14 +368,84 @@ class MCPClient:
             if isinstance(part, types.Part) and not part.function_call:
                 final_response += part.text
         
+        # Filter out apology phrases about lack of real-time data
+        apology_phrases = [
+            "i don't have access to real-time",
+            "i don't have access to current",
+            "i cannot provide real-time",
+            "i cannot provide up-to-date",
+            "i cannot provide current",
+            "i don't have real-time",
+            "i don't have the latest",
+            "i don't have current",
+            "i can't access real-time",
+            "i cannot access current",
+            "as an ai, i don't have",
+            "my knowledge is limited to",
+            "i am not able to access",
+            "i don't have the ability to access",
+            "i'm sorry",
+            "i am sorry",
+            "i apologize",
+            "i cannot provide a real-time updated"
+        ]
+        
+        # Check for and remove sentences containing apology phrases
+        sentences = final_response.split('. ')
+        filtered_sentences = []
+        
+        for sentence in sentences:
+            lower_sentence = sentence.lower()
+            if not any(phrase in lower_sentence for phrase in apology_phrases):
+                filtered_sentences.append(sentence)
+        
+        filtered_response = '. '.join(filtered_sentences)
+        
+        # Fix any punctuation issues from the filtering
+        filtered_response = filtered_response.replace(' .', '.').replace('..', '.')
+        if filtered_response and not filtered_response.endswith(('.', '!', '?')):
+            filtered_response += '.'
+            
+        # If the filtering removed too much content, use websearch as a fallback
+        if len(filtered_response) < len(final_response) * 0.5 and len(filtered_response.strip()) < 100:
+            print("\n[Response contained too many apologies, triggering websearch as fallback]")
+            try:
+                result = await self.session.call_tool("websearch", {"query": query})
+                if isinstance(result.content, Dict) and "results" in result.content:
+                    # Create a new user query with search results
+                    search_results = result.content.get("results", [])
+                    search_content = "Based on these search results:\n\n"
+                    
+                    for i, result in enumerate(search_results[:3], 1):
+                        search_content += f"{i}. {result.get('title')}: {result.get('snippet')}\n"
+                    
+                    search_content += f"\nPlease answer: {query}"
+                    
+                    # Create a new query with the search results
+                    new_query_content = types.Content(
+                        role='user',
+                        parts=[types.Part.from_text(text=search_content)]
+                    )
+                    
+                    # Get a new response without adding to history
+                    new_response = self.genai_client.models.generate_content(
+                        model='gemini-2.0-flash-001',
+                        contents=[system_instruction, new_query_content],
+                    )
+                    
+                    if new_response.candidates and new_response.candidates[0].content.parts:
+                        filtered_response = new_response.candidates[0].content.parts[0].text
+            except Exception as e:
+                print(f"\n[Error in fallback processing: {str(e)}]")
+        
         # Add the assistant's response to the conversation history
         assistant_content = types.Content(
             role='assistant',
-            parts=[types.Part.from_text(text=final_response)]
+            parts=[types.Part.from_text(text=filtered_response or final_response)]
         )
         self.conversation_history.append(assistant_content)
 
-        return final_response
+        return filtered_response or final_response
 
 
     async def chat_loop(self):
