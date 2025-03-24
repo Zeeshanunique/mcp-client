@@ -56,18 +56,20 @@ async def on_chat_start():
     Initialize the chat session.
     """
     # Set the title for the chat interface
-    await cl.Message(content="# MCP Client Interface\nType a query to get started.").send()
+    welcome_msg = await cl.Message(content="# MCP Client Interface\nType a query to get started.").send()
     
     # Initialize conversation history
     global conversation_history
     conversation_history = []
     
     # Add a button to clear conversation history in the sidebar
+    # The action needs to be associated with a message via for_id
     await cl.Action(
         name="clear_history",
         label="Clear History",
         description="Clear the conversation history",
-        payload={}
+        payload={},
+        for_id=welcome_msg.id
     ).send()
 
 @cl.on_message
@@ -81,7 +83,7 @@ async def on_message(message: cl.Message):
     query = message.content
     
     # Show thinking indicator while processing
-    await cl.Message(content="Processing query...").send()
+    thinking_msg = await cl.Message(content="Processing query...").send()
     
     # Format history for the command (excluding the current query)
     history_for_command = conversation_history.copy()
@@ -100,6 +102,9 @@ async def on_message(message: cl.Message):
         'role': 'assistant',
         'content': response
     })
+    
+    # Update or remove the thinking message
+    await thinking_msg.remove()
     
     # Send the response back to the user
     await cl.Message(content=response).send()
