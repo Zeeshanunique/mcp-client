@@ -21,6 +21,29 @@ from dotenv import load_dotenv  # For loading API keys from a .env file
 # Load environment variables from .env file
 load_dotenv()
 
+# Function to get API keys from various sources
+def get_api_key(key_name, default=None):
+    """
+    Get API key from Streamlit secrets, environment variables, or default value.
+    
+    Args:
+        key_name: Name of the API key
+        default: Default value if key not found
+        
+    Returns:
+        API key value or default
+    """
+    try:
+        # First try to get from Streamlit secrets
+        import streamlit as st
+        if hasattr(st, 'secrets') and key_name in st.secrets:
+            return st.secrets[key_name]
+    except (ImportError, AttributeError):
+        pass
+    
+    # Then try environment variables
+    return os.getenv(key_name, default)
+
 class MCPClient:
     def __init__(self):
         """Initialize the MCP client and configure the Gemini API."""
@@ -28,10 +51,10 @@ class MCPClient:
         self.exit_stack = AsyncExitStack()  # Manages async resource cleanup
         self.conversation_history = []  # Store conversation history
 
-        # Retrieve the Gemini API key from environment variables
-        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        # Retrieve the Gemini API key from environment variables or secrets
+        gemini_api_key = get_api_key("GEMINI_API_KEY")
         if not gemini_api_key:
-            raise ValueError("GEMINI_API_KEY not found. Please add it to your .env file.")
+            raise ValueError("GEMINI_API_KEY not found. Please add it to your environment or Streamlit secrets.")
 
         # Configure the Gemini AI client
         self.genai_client = genai.Client(api_key=gemini_api_key)
@@ -70,11 +93,11 @@ class MCPClient:
         
         # Check SerpAPI configuration if websearch is available
         if has_websearch:
-            serpapi_key = os.getenv("SERPAPI_KEY")
+            serpapi_key = get_api_key("SERPAPI_KEY")
             if not serpapi_key:
                 print("\n[WARNING] SERPAPI_KEY environment variable not set.")
                 print("Web search functionality will not work correctly.")
-                print("Please add your SerpAPI key to your .env file: SERPAPI_KEY=your_key_here")
+                print("Please add your SerpAPI key to your environment or Streamlit secrets.")
             else:
                 print(f"\n[OK] SERPAPI_KEY is configured (length: {len(serpapi_key)})")
 
@@ -315,13 +338,13 @@ class MCPClient:
                                 # Special case for websearch API key issues
                                 if tool_name == "websearch" and "SERPAPI_KEY" in str(result.content):
                                     return "Web search functionality is not properly configured. " + \
-                                           "Please add your SerpAPI key to your .env file: SERPAPI_KEY=your_key_here\n\n" + \
+                                           "Please add your SerpAPI key to your environment or Streamlit secrets.\n\n" + \
                                            "You can get a free SerpAPI key by signing up at https://serpapi.com/"
                                     
                                 # Special case for authentication errors
                                 if tool_name == "websearch" and ("authentication" in str(result.content).lower() or "invalid key" in str(result.content).lower()):
                                     return "Your SerpAPI key appears to be invalid or has expired. " + \
-                                           "Please check your SERPAPI_KEY in the .env file and make sure it's valid.\n\n" + \
+                                           "Please check your SERPAPI_KEY in the environment or Streamlit secrets and make sure it's valid.\n\n" + \
                                            "You can verify your key at https://serpapi.com/dashboard"
                             else:
                                 # Special handling for websearch successful results
