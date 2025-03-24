@@ -106,16 +106,28 @@ class MCPClient:
         # Use the full conversation history for context
         contents_history = self.conversation_history.copy()
 
-        # Add a system instruction to use websearch for real-time data
-        system_instruction = types.Content(
-            role='system',
-            parts=[types.Part.from_text(
-                text="When you don't have access to real-time or recent information, use the websearch tool to find it instead of apologizing. Don't say 'I don't have access to real-time data' or similar phrases."
-            )]
-        )
-        
-        # Insert the system instruction at the beginning of the history
-        contents_history.insert(0, system_instruction)
+        # Instead of using system role (not supported), add this instruction as a user message at the beginning
+        # only if this is the first message in the conversation
+        if len(self.conversation_history) <= 1:
+            instruction_message = types.Content(
+                role='user',
+                parts=[types.Part.from_text(
+                    text="INSTRUCTION: When you don't have access to real-time or recent information, use the websearch tool to find it instead of apologizing. Don't say 'I don't have access to real-time data' or similar phrases."
+                )]
+            )
+            
+            # Add model response acknowledging the instruction
+            acknowledgment = types.Content(
+                role='model',
+                parts=[types.Part.from_text(
+                    text="I'll use the websearch tool for real-time information and won't apologize for lacking data."
+                )]
+            )
+            
+            # Add to conversation history for future context only
+            if not any(part.text == instruction_message.parts[0].text for content in self.conversation_history for part in content.parts if hasattr(part, 'text')):
+                self.conversation_history.insert(0, acknowledgment)
+                self.conversation_history.insert(0, instruction_message)
 
         # Send user input to Gemini AI and include available tools for function calling
         response = self.genai_client.models.generate_content(
@@ -430,7 +442,7 @@ class MCPClient:
                     # Get a new response without adding to history
                     new_response = self.genai_client.models.generate_content(
                         model='gemini-2.0-flash-001',
-                        contents=[system_instruction, new_query_content],
+                        contents=[new_query_content],
                     )
                     
                     if new_response.candidates and new_response.candidates[0].content.parts:
