@@ -61,6 +61,13 @@ async def on_chat_start():
     # Initialize conversation history
     global conversation_history
     conversation_history = []
+    
+    # Add a button to clear conversation history in the sidebar
+    await cl.Action(
+        name="clear_history",
+        label="Clear History",
+        description="Clear the conversation history",
+    ).send()
 
 @cl.on_message
 async def on_message(message: cl.Message):
@@ -104,12 +111,3 @@ async def clear_history(action):
     global conversation_history
     conversation_history = []
     await cl.Message(content="Conversation history cleared!").send()
-
-# Add a button to clear conversation history
-@cl.on_sidebar_button
-async def sidebar_button(state):
-    await cl.Action(
-        name="clear_history",
-        label="Clear History",
-        description="Clear the conversation history",
-    ).send()
