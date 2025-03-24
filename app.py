@@ -63,14 +63,13 @@ async def on_chat_start():
     conversation_history = []
     
     # Add a button to clear conversation history in the sidebar
-    # The action needs to be associated with a message via for_id
+    # The for_id parameter needs to be on the send() method, not in the Action constructor
     await cl.Action(
         name="clear_history",
         label="Clear History",
         description="Clear the conversation history",
-        payload={},
-        for_id=welcome_msg.id
-    ).send()
+        payload={}
+    ).send(for_id=welcome_msg.id)
 
 @cl.on_message
 async def on_message(message: cl.Message):
